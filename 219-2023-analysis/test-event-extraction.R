@@ -1,11 +1,17 @@
 library(edfReader)
 library(purrr)
 library(dplyr)
+library(jsonlite)
 
+
+# subject?
+
+SUBJECT <- "03"
 
 # read in EEG data
 
-head <- readEdfHeader('data/eeg/subject-01-eeg_2023-02-08.bdf')
+eeg.file <- list.files('data/eeg', pattern=paste0("subject-", SUBJECT), full.names = T)
+head <- readEdfHeader(eeg.file)
 signals <- readEdfSignals(head, signals="Ordinary")
 
 
@@ -14,7 +20,7 @@ eeg.data$sample_id <- 1:nrow(eeg.data)
 
 ## read in behavioral data
 
-behavioral.data <- fromJSON('data/behavior/219_2023_behavioral_01.json')
+behavioral.data <- fromJSON(paste0('data/behavior/219_2023_behavioral_', SUBJECT,'.json'))
 
 card.reveals <- behavioral.data %>% filter(task=="reveal") %>% select(eeg_event_id, card, color, participant_choice, card_value, wins_so_far, outcome, sequence_id)
 
