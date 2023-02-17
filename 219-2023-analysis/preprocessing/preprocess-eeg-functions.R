@@ -4,7 +4,7 @@ library(tidyr)
 library(purrr)
 source('preprocessing/extract-events.R')
 
-preprocess_eeg <- function(file, beh.file, subject_id, sampling_rate=500, filter_low=0.1, filter_high=40, segment_begin=-100, segment_end=1000, segment_offset=0, bad_segment_range=200, which_electrodes=c('Cz', 'Fz')){
+preprocess_eeg <- function(file, beh.file, subject_id, sampling_rate=500, filter_low=0.1, filter_high=40, segment_begin=-100, segment_end=1000, segment_offset=0, bad_segment_range=200, which_electrodes=c('Cz', 'Fz', 'Fp1', 'Fp2')){
   data <- read_eeg_tidy(eeg.file, beh.file, which_electrodes) %>%
     linked_ears_rereference() %>%
     bandpass_filter(low=filter_low, high=filter_high, sampling_rate=sampling_rate) %>%
