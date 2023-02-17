@@ -8,7 +8,7 @@ preprocess_eeg <- function(file, beh.file, subject_id, sampling_rate=500, filter
   data <- read_eeg_tidy(eeg.file, beh.file, which_electrodes) %>%
     linked_ears_rereference() %>%
     bandpass_filter(low=filter_low, high=filter_high, sampling_rate=sampling_rate) %>%
-    segment(start = segment_begin, end = segment_end, offset=segment_offset, sampling_rate=sampling_rate) #%>%
+    segment(start = segment_begin, end = segment_end, offset=segment_offset, sampling_rate=sampling_rate) %>%
     artifact_rejection(max_range=bad_segment_range) %>%
     baseline_correct() %>%
     mutate(subject = subject_id)
