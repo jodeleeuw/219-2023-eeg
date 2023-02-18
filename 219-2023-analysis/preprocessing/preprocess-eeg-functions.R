@@ -2,12 +2,14 @@ library(eegkit)
 library(dplyr)
 library(tidyr)
 library(purrr)
+library(ravetools)
 source('preprocessing/extract-events.R')
 
-preprocess_eeg <- function(file, beh.file, subject_id, sampling_rate=500, filter_low=0.1, filter_high=40, segment_begin=-100, segment_end=1000, segment_offset=0, bad_segment_range=200, which_electrodes=c('Cz', 'Fz', 'Fp1', 'Fp2')){
+preprocess_eeg <- function(file, beh.file, subject_id, sampling_rate=500, filter_low=0.1, filter_high=70, notch_filter_low=58, notch_filter_high=62, segment_begin=-100, segment_end=1000, segment_offset=0, bad_segment_range=200, which_electrodes=c('Cz', 'Fz', 'Fp1', 'Fp2')){
   data <- read_eeg_tidy(eeg.file, beh.file, which_electrodes) %>%
     linked_ears_rereference() %>%
-    bandpass_filter(low=filter_low, high=filter_high, sampling_rate=sampling_rate) %>%
+    bandpass(low=filter_low, high=filter_high, sampling_rate=sampling_rate) %>%
+    notch(low=notch_filter_low, high=notch_filter_high, sampling_rate=sampling_rate) %>%
     segment(start = segment_begin, end = segment_end, offset=segment_offset, sampling_rate=sampling_rate) %>%
     artifact_rejection(max_range=bad_segment_range) %>%
     baseline_correct() %>%
@@ -51,13 +53,22 @@ linked_ears_rereference <- function(data){
   return(data)
 }
 
-bandpass_filter <- function(data, low, high, sampling_rate){
-  order <- 3 * sampling_rate / low
-  
+bandpass <- function(data, low, high, sampling_rate){
   df <- data$signals
   df <- df %>% 
     group_by(electrode) %>% 
-    mutate(v = eegfilter(v, sampling_rate, low, high, method="fir1", order=order)[,1]) %>%
+    mutate(v = band_pass1(v, sampling_rate, low, high)) %>%
+    ungroup()
+  data$signals <- df
+  return(data)
+}
+
+
+notch <- function(data, low, high, sampling_rate){
+  df <- data$signals
+  df <- df %>% 
+    group_by(electrode) %>% 
+    mutate(v = notch_filter(v, sampling_rate, low, high)) %>%
     ungroup()
   data$signals <- df
   return(data)
@@ -83,14 +94,35 @@ segment <- function(data, start, end, offset, sampling_rate){
   return(epochs)    
 }
 
-artifact_rejection <- function(epochs, max_range){
+eyeblink_detector_step <- function(v, window_size=200, sampling_rate=500){
+  window <- window_size * (sampling_rate/1000)
+  max.diff <- -Inf
+  for(i in 1:(length(v)-window)){
+    diff <- -mean(v[i:(i+(window/2))]) + mean(v[(i+(window/2)+1):(i+window)])
+    diff <- abs(diff)
+    if(diff > max.diff){
+      max.diff <- diff
+    }
+  }
+  return(max.diff)
+}
+
+artifact_rejection <- function(epochs, max_range=200, eye_threshold=70){
   d <- epochs %>% group_by(hand_id, card_id, electrode) %>%
-    summarize(r = max(v) - min(v)) %>%
-    ungroup() %>%
-    mutate(good_segment = r <= max_range)
+    summarize(v_range = max(v) - min(v), eye_range = eyeblink_detector_step(v))
+  
+  eyeblinks <- d %>% group_by(hand_id, card_id) %>%
+    summarize(eyeblink = any(eye_range > eye_threshold))
+  
+  good.segments <- d %>%
+    left_join(eyeblinks, by=c("hand_id", "card_id")) %>%
+    group_by(hand_id, card_id, electrode) %>%
+    mutate(good_segment = v_range <= max_range & !eyeblink) %>%
+    ungroup()
+  
   
   epochs.ar <- epochs %>%
-    left_join(d, by=c("hand_id", "card_id", "electrode"))
+    left_join(good.segments, by=c("hand_id", "card_id", "electrode"))
   
   return(epochs.ar)
 }

@@ -9,24 +9,17 @@ result <- preprocess_eeg(eeg.file, beh.file, SUBJECT)
 
 library(ggplot2)
 
-# grand.average <- dd %>% group_by(electrode, t) %>%
-#   dplyr::filter(good_segment==TRUE) %>%
-#   summarize(mv = mean(v))
-# 
-# ggplot(grand.average,aes(x=t, y=mv, color=electrode)) +
-#   geom_hline(yintercept=0)+
-#   geom_vline(xintercept=0)+
-#   geom_line() +
-#   annotate("rect",xmin=200,xmax=350,ymin=-4,ymax=12,fill="blue", alpha=0.05)+
-#   coord_cartesian(ylim=c(12,-4), expand = FALSE)+
-#   theme_bw()
-
-result <- d
-
-segment.eeg <- result %>% filter(hand_id == 15, card_id == 3, electrode == 'Fz')
+segment.eeg <- result %>% filter(hand_id == 50, card_id == 4, electrode == 'Fp1')
 
 ggplot(segment.eeg, aes(x=t, y=v)) +
   geom_hline(yintercept=0)+
   geom_vline(xintercept=0)+
   geom_line() +
+  theme_bw()
+
+blinks <- result %>% filter(eyeblink == TRUE, electrode == 'Fp1')
+
+ggplot(blinks, aes(x=t, y=v))+
+  facet_wrap(vars(hand_id, card_id))+
+  geom_line()+
   theme_bw()
