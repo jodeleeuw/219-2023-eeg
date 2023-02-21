@@ -1,0 +1,112 @@
+---
+title: "Replication of Brydevall et al. 2018"
+author: "Josh de Leeuw"
+format: html
+editor: visual
+---
+
+```{r}
+#| label: Load libraries
+#| echo: false
+#| message: false
+#| warning: false
+
+library(dplyr)
+library(ggplot2)
+library(readr)
+```
+
+## Results
+
+### Behavioral
+
+```{r}
+#| label: Load the Behavioral Data
+#| echo: false
+#| message: false
+
+
+data.behavioral <- read_csv("data/preprocessed/behavioral.csv")
+
+```
+
+```{r}
+#| label: Attention check calculations
+#| echo: false
+
+attention.check.responses <- data.behavioral %>%
+  filter(task=="catch", phase=="test", card == catch_n) %>%
+  group_by(subject_id) %>%
+  summarize(successes = sum(rt < 1500), mean_rt = mean(rt))
+
+attention.check.overall.m <- attention.check.responses %>% pull(successes) %>% mean()
+attention.check.overall.sd <- attention.check.responses %>% pull(successes) %>%
+  sd()
+attention.check.rt.m <- attention.check.responses %>% pull(mean_rt) %>%
+  mean()
+attention.check.rt.sd <- attention.check.responses %>% pull(mean_rt) %>%
+  sd()
+
+
+attention.check.failures <- attention.check.responses %>% filter(successes < 3)
+```
+
+There were five attention check trials, one during each block, throughout the experiment. The mean number of correct responses was `r attention.check.overall.m` (*SD* = `r attention.check.overall.sd`) and the average response time was We excluded `r nrow(attention.check.failures)` participants for failing more than 2 attention checks.
+
+### EEG
+
+```{r}
+#| label: Load EEG data
+#| echo: false
+#| message: false
+
+data.eeg <- read_csv('data/preprocessed/eeg.csv')
+
+```
+
+```{r}
+#| label: Filter EEG data
+#| echo: false
+
+data.eeg.filtered <- data.eeg %>%
+  filter(good_segment == TRUE) %>%
+  filter(electrode %in% c("Cz", "Fz"))
+
+```
+
+```{r}
+#| label: Compute RPEs and IPEs
+#| echo: false
+#| message: false
+
+hand.information <- data.behavioral %>% 
+  filter(phase=='test', task=='reveal') %>%
+  mutate(subject = subject_id) %>%
+  select(-subject_id) %>%
+  group_by(subject) %>%
+  mutate(hand_id = rep(1:80, each=5)) %>%
+  mutate(losses_so_far = (card-1) - wins_so_far) %>%
+  select(subject, hand_id, card, card_value, wins_so_far, losses_so_far, outcome)
+
+hand.information.with.rpe <- hand.information %>%
+  mutate(
+    wp_before = pbinom(2-losses_so_far, 5-(card-1), 0.5), 
+    wp_after = pbinom(2-(losses_so_far+abs(1-card_value)), 5-card, 0.5), 
+    rpe = wp_after-wp_before)
+
+entropy <- function(p){
+  return(ifelse(p == 0 | p == 1, 0, -p*log2(p) - (1-p)*log2(1-p)))
+}
+
+hand.information.with.rpe.and.ipe <- hand.information.with.rpe %>%
+  mutate(wp_alternative = pbinom(2-(losses_so_far+card_value), 5-card, 0.5)) %>%
+  mutate(information = entropy(wp_before) - entropy(wp_after),
+         information_expected = ((entropy(wp_before) - entropy(wp_after)) + (entropy(wp_before) - entropy(wp_alternative))) / 2,
+         ipe = information - information_expected)
+
+data.eeg.filtered.rpe.ipe <- data.eeg.filtered %>%
+  mutate(card = card_id) %>%
+  select(-card_id) %>%
+  left_join(hand.information.with.rpe.and.ipe, by=c("subject", "hand_id", "card"))
+
+```

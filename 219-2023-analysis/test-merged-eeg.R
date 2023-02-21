@@ -5,6 +5,14 @@ library(ggplot2)
 eeg <- read_csv('data/preprocessed/eeg.csv')
 behavioral <- read_csv('data/preprocessed/behavioral.csv')
 
+attention.checks <- behavioral %>% 
+  filter(task=="catch", card==catch_n, phase=="test") %>%
+  select(subject_id, rt, response, task, card, phase)
+
+attention.check.responses <- attention.checks %>%
+  group_by(subject_id) %>%
+  summarize(failed = sum(is.null(rt) | (rt > 1500)))
+
 grand.averages <- eeg %>% filter(electrode %in% c("Cz", "Fz")) %>%
   filter(good_segment==T) %>%
   group_by(subject, t, electrode) %>%
