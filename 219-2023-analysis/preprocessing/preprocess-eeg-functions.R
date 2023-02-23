@@ -1,11 +1,11 @@
-library(eegkit)
 library(dplyr)
 library(tidyr)
 library(purrr)
 library(ravetools)
+library(eegkit)
 source('preprocessing/extract-events.R')
 
-preprocess_eeg <- function(file, beh.file, subject_id, sampling_rate=500, filter_low=0.1, filter_high=70, notch_filter_low=58, notch_filter_high=62, segment_begin=-100, segment_end=1000, segment_offset=0, bad_segment_range=200, which_electrodes=c('Cz', 'Fz', 'Fp1', 'Fp2')){
+preprocess_eeg <- function(file, beh.file, subject_id, sampling_rate=500, filter_low=0.1, filter_high=70, notch_filter_low=59, notch_filter_high=61, segment_begin=-100, segment_end=1000, segment_offset=0, bad_segment_range=200, which_electrodes=c('Cz', 'Fz', 'Fp1', 'Fp2')){
   data <- read_eeg_tidy(eeg.file, beh.file, which_electrodes) %>%
     linked_ears_rereference() %>%
     bandpass(low=filter_low, high=filter_high, sampling_rate=sampling_rate) %>%
@@ -57,7 +57,7 @@ bandpass <- function(data, low, high, sampling_rate){
   df <- data$signals
   df <- df %>% 
     group_by(electrode) %>% 
-    mutate(v = band_pass1(v, sampling_rate, low, high)) %>%
+    mutate(v = eegfilter(v, sampling_rate, low, high)) %>%
     ungroup()
   data$signals <- df
   return(data)

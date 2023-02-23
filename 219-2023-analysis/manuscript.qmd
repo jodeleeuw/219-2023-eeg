@@ -1,7 +1,9 @@
 ---
 title: "Replication of Brydevall et al. 2018"
 author: "Josh de Leeuw"
-format: html
+format: 
+  html:
+    df-print: kable
 editor: visual
 ---
 
@@ -14,6 +16,7 @@ editor: visual
 library(dplyr)
 library(ggplot2)
 library(readr)
+library(ez)
 ```
 
 ## Results
@@ -43,15 +46,15 @@ attention.check.overall.m <- attention.check.responses %>% pull(successes) %>% m
 attention.check.overall.sd <- attention.check.responses %>% pull(successes) %>%
   sd()
 attention.check.rt.m <- attention.check.responses %>% pull(mean_rt) %>%
-  mean()
+  mean() %>% round(0)
 attention.check.rt.sd <- attention.check.responses %>% pull(mean_rt) %>%
-  sd()
+  sd() %>% round(0)
 
 
 attention.check.failures <- attention.check.responses %>% filter(successes < 3)
 ```
 
-There were five attention check trials, one during each block, throughout the experiment. The mean number of correct responses was `r attention.check.overall.m` (*SD* = `r attention.check.overall.sd`) and the average response time was We excluded `r nrow(attention.check.failures)` participants for failing more than 2 attention checks.
+There were five attention check trials, one during each block, throughout the experiment. The mean number of correct responses was `r attention.check.overall.m` (*SD* = `r attention.check.overall.sd`) and the average response time was `r attention.check.rt.m`ms (*SD* = `r attention.check.rt.sd`). As per our pre-registered criteria, we excluded `r nrow(attention.check.failures)` participants for failing more than 2 attention checks (defined as a response time greater than 1,500ms).
 
 ### EEG
 
@@ -102,11 +105,141 @@ hand.information.with.rpe.and.ipe <- hand.information.with.rpe %>%
   mutate(wp_alternative = pbinom(2-(losses_so_far+card_value), 5-card, 0.5)) %>%
   mutate(information = entropy(wp_before) - entropy(wp_after),
          information_expected = ((entropy(wp_before) - entropy(wp_after)) + (entropy(wp_before) - entropy(wp_alternative))) / 2,
-         ipe = information - information_expected)
+         ipe = information - information_expected) %>%
+  mutate(rpe_type = case_when(
+    rpe > 0 ~ "Positive",
+    rpe < 0 ~ "Negative",
+    rpe == 0 ~ "None")) %>%
+  mutate(ipe_type = case_when(
+    ipe > 0 ~ "Positive",
+    ipe < 0 ~ "Negative",
+    ipe == 0 ~ "None"))
 
 data.eeg.filtered.rpe.ipe <- data.eeg.filtered %>%
   mutate(card = card_id) %>%
   select(-card_id) %>%
   left_join(hand.information.with.rpe.and.ipe, by=c("subject", "hand_id", "card"))
 
+```
+
+```{r}
+#| label: Define ERP time window
+#| echo: false
+
+frn.window <- 200:350
+```
+
+```{r}
+#| label: Count usable segments for RPEs
+#| echo: false
+#| message: false
+
+rpe.segments <- data.eeg.filtered.rpe.ipe %>%
+  filter(rpe_type != "None") %>%
+  group_by(subject, electrode, hand_id, card, rpe_type) %>%
+  summarize(n = n()) %>%
+  group_by(subject, electrode, rpe_type) %>%
+  summarize(n = n())
+```
+
+```{r}
+#| label: Count usable segments for IPEs
+#| echo: false
+#| message: false
+
+ipe.segments <- data.eeg.filtered.rpe.ipe %>%
+  filter(ipe_type != "None") %>%
+  group_by(subject, electrode, hand_id, card, ipe_type) %>%
+  summarize(n = n()) %>%
+  group_by(subject, electrode, ipe_type) %>%
+  summarize(n = n())
+```
+
+We pre-registered an inclusion criteria that a participant must have at least 20 usable epochs of data of a particular event type in order to be included in the corresponding analyses. The minimum number of usable epochs for the RPE analysis in an individual subject was `r rpe.segments %>% pull(n) %>% min()`, *M*=`r rpe.segments %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r rpe.segments %>% pull(n) %>% sd() %>% round(0)`. The minimum number of usable epochs for the IPE analysis in an individual subject was `r ipe.segments %>% pull(n) %>% min()`, *M*=`r ipe.segments %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r ipe.segments %>% pull(n) %>% sd() %>% round(0)`. Therefore, no participants needed to be excluded from the following analyses.
+
+```{r}
+#| label: Generate data for Grand Averages
+#| echo: false
+#| message: false
+
+rpe.erp.data.subject <- data.eeg.filtered.rpe.ipe %>%
+  filter(rpe_type != "None") %>%
+  group_by(subject, electrode, t, rpe_type) %>%
+  summarize(m.subject = mean(v))
+
+rpe.erp.data.group <- rpe.erp.data.subject %>%
+  group_by(electrode, t, rpe_type) %>%
+  summarize(m = mean(m.subject), se = sd(m.subject)/sqrt(n())) %>%
+  mutate(error_type = "Reward Prediction Error", error_sign = rpe_type)
+
+ipe.erp.data.subject <- data.eeg.filtered.rpe.ipe %>%
+  filter(ipe_type != "None") %>%
+  group_by(subject, electrode, t, ipe_type) %>%
+  summarize(m.subject = mean(v))
+
+ipe.erp.data.group <- ipe.erp.data.subject %>%
+  group_by(electrode, t, ipe_type) %>%
+  summarize(m = mean(m.subject), se = sd(m.subject)/sqrt(n())) %>%
+  mutate(error_type = "Information Prediction Error", error_sign = ipe_type)
+
+erp.data <- rpe.erp.data.group %>% bind_rows(ipe.erp.data.group) %>%
+  select(-rpe_type, -ipe_type)
+
+```
+
+```{r}
+#| label: fig-grand-averages
+#| echo: false
+#| fig-cap: Grand average ERPs for both electrode sites (Cz, Fz) and both error types (Information Prediction and Reward Prediction). The critical time window for our analysis, 200-350ms, is highlighted.
+
+ggplot(erp.data, aes(x=t, y=m, ymin=m-se, ymax=m+se, color=error_sign, fill=error_sign))+
+  facet_grid(error_type ~ electrode)+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  annotate("rect", xmin=min(frn.window), xmax=max(frn.window), ymin=-Inf, ymax=Inf, alpha=0.4)+
+  geom_ribbon(color=NA, alpha = 0.2)+
+  geom_line()+
+  scale_y_reverse()+
+  scale_color_brewer(type="qual", palette = "Set1", name="Error Direction")+
+  scale_fill_brewer(type="qual", palette = "Set1", name="Error Direction")+
+  labs(x="Time since card value revealed (ms)", y="Microvolts")+
+  theme_minimal()+
+  theme(panel.grid = element_blank())
+
+```
+
+```{r}
+#| label: Compute ANOVA data
+#| echo: false
+#| message: false
+
+rpe.anova.data <- rpe.erp.data.subject %>%
+  filter(t %in% frn.window) %>%
+  group_by(subject, electrode, rpe_type) %>%
+  summarize(M = mean(m.subject))
+
+ipe.anova.data <- ipe.erp.data.subject %>%
+  filter(t %in% frn.window) %>%
+  group_by(subject, electrode, ipe_type) %>%
+  summarize(M = mean(m.subject))
+```
+
+```{r}
+#| label: RPE ANOVA
+#| echo: false
+#| warning: false
+
+rpe.anova <- ezANOVA(rpe.anova.data, dv=M, wid=subject, within=c(electrode, rpe_type))
+
+rpe.anova$ANOVA
+```
+
+```{r}
+#| label: IPE ANOVA
+#| echo: false
+#| warning: false
+
+ipe.anova <- ezANOVA(ipe.anova.data, dv=M, wid=subject, within=c(electrode, ipe_type))
+
+ipe.anova$ANOVA
 ```
