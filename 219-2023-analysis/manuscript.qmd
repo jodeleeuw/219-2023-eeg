@@ -19,9 +19,7 @@ library(readr)
 library(ez)
 ```
 
-## Results
-
-### Behavioral
+## Methods
 
 ```{r}
 #| label: Load the Behavioral Data
@@ -30,8 +28,22 @@ library(ez)
 
 
 data.behavioral <- read_csv("data/preprocessed/behavioral.csv")
-
 ```
+
+### Participants
+
+```{r}
+#| label: Count participants
+#| echo: false
+
+n.participants <- data.behavioral %>% pull(subject_id) %>% unique() %>% length()
+```
+
+`r n.participants` Vassar College students participated in this study. All participants were right-handed.
+
+## Results
+
+### Behavioral
 
 ```{r}
 #| label: Attention check calculations
@@ -155,7 +167,18 @@ ipe.segments <- data.eeg.filtered.rpe.ipe %>%
   summarize(n = n())
 ```
 
-We pre-registered an inclusion criteria that a participant must have at least 20 usable epochs of data of a particular event type in order to be included in the corresponding analyses. The minimum number of usable epochs for the RPE analysis in an individual subject was `r rpe.segments %>% pull(n) %>% min()`, *M*=`r rpe.segments %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r rpe.segments %>% pull(n) %>% sd() %>% round(0)`. The minimum number of usable epochs for the IPE analysis in an individual subject was `r ipe.segments %>% pull(n) %>% min()`, *M*=`r ipe.segments %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r ipe.segments %>% pull(n) %>% sd() %>% round(0)`. Therefore, no participants needed to be excluded from the following analyses.
+```{r}
+#| label: Exclude bad EEG
+#| echo: false
+
+bad.eeg.subjects <- rpe.segments %>% 
+  filter(n < 20) %>% 
+  bind_rows(ipe.segments %>% filter(n < 20)) %>%
+  pull(subject) %>%
+  unique()
+```
+
+We pre-registered an inclusion criteria that a participant must have at least 20 usable epochs of data of a particular event type in order to be included in the corresponding analyses. The minimum number of usable epochs for the RPE analysis in an individual subject was `r rpe.segments %>% pull(n) %>% min()`, *M*=`r rpe.segments %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r rpe.segments %>% pull(n) %>% sd() %>% round(0)`. The minimum number of usable epochs for the IPE analysis in an individual subject was `r ipe.segments %>% pull(n) %>% min()`, *M*=`r ipe.segments %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r ipe.segments %>% pull(n) %>% sd() %>% round(0)`. `r bad.eeg.subjects %>% length()` subject was excluded for poor EEG data quality.
 
 ```{r}
 #| label: Generate data for Grand Averages
@@ -164,6 +187,7 @@ We pre-registered an inclusion criteria that a participant must have at least 20
 
 rpe.erp.data.subject <- data.eeg.filtered.rpe.ipe %>%
   filter(rpe_type != "None") %>%
+  filter(!subject %in% bad.eeg.subjects) %>%
   group_by(subject, electrode, t, rpe_type) %>%
   summarize(m.subject = mean(v))
 
@@ -174,6 +198,7 @@ rpe.erp.data.group <- rpe.erp.data.subject %>%
 
 ipe.erp.data.subject <- data.eeg.filtered.rpe.ipe %>%
   filter(ipe_type != "None") %>%
+  filter(!subject %in% bad.eeg.subjects) %>%
   group_by(subject, electrode, t, ipe_type) %>%
   summarize(m.subject = mean(v))
 
