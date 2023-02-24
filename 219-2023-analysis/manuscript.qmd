@@ -19,6 +19,16 @@ library(readr)
 library(ez)
 ```
 
+```{r}
+#| label: Get preprocessed data from OSF
+#| include: false
+#| echo: false
+
+osf_retrieve_node("2pxf4") %>%
+  osf_ls_files() %>%
+  osf_download(path="data/preprocessed/", conflicts="skip")
+```
+
 ## Methods
 
 ```{r}
