@@ -40,14 +40,57 @@ extract_events <- function(eeg.file, beh.file){
   hand_counter <- 1
   eeg_event_counter <- 1
   
-  while(eeg_event_counter <= nrow(events.hands.only)){
-    if(events.hands.only$TRIGGER[eeg_event_counter] == hand.ids$sequence_id[hand_counter]){
-      events.hands.only$hand_id[eeg_event_counter] = hand.ids$hand_id[hand_counter]
-      eeg_event_counter <- eeg_event_counter + 1
+  # while(eeg_event_counter <= nrow(events.hands.only)){
+  #   if(events.hands.only$TRIGGER[eeg_event_counter] == hand.ids$sequence_id[hand_counter]){
+  #     events.hands.only$hand_id[eeg_event_counter] = hand.ids$hand_id[hand_counter]
+  #     eeg_event_counter <- eeg_event_counter + 1
+  #   } 
+  #   hand_counter <- hand_counter + 1
+  # }
+  
+  eeg.hand.events <- events.hands.only$TRIGGER
+  jspsych.hand.sequence <- hand.ids$sequence_id
+  
+  L <- c(LETTERS, letters)
+  
+  eeg.hand.events.encoded  <- L[eeg.hand.events] %>% paste0(collapse="")
+  jspsych.hand.sequence.encoded <- L[jspsych.hand.sequence] %>% paste0(collapse="")
+  
+  alignment.solution <- text.alignment::smith_waterman(eeg.hand.events.encoded, jspsych.hand.sequence.encoded, lower=FALSE)
+  
+  a.z <- unlist(sapply(stringr::str_split(alignment.solution$a$alignment$text,"")[[1]], function(x){ 
+    if(x=="#") { return(NA) } 
+    return(which(L==x))
+  }, simplify=TRUE))
+  b.z <- unlist(sapply(stringr::str_split(alignment.solution$b$alignment$text,"")[[1]], function(x){ 
+    if(x=="#") { return(NA) } 
+    return(which(L==x))
+  }, simplify=TRUE))
+  
+  aligned.hands <- rep(0, length(a))
+  event.loc <- 1
+  hand.id <- 1
+  for(i in 1:length(a.z)){
+    if(is.na(b.z[i])) { 
+      aligned.hands[event.loc] <- NA 
+      event.loc <- event.loc + 1
+      next
     } 
-    hand_counter <- hand_counter + 1
+    if(is.na(a.z[i])) { 
+      hand.id <- hand.id + 1
+      next
+    }
+    if(a.z[i] == b.z[i]) { 
+      aligned.hands[event.loc] <- hand.id 
+      event.loc <- event.loc + 1
+      hand.id <- hand.id + 1
+      next
+    }
   }
   
+  events.hands.only$hand_id <- aligned.hands
+  
+  events.hands.only <- events.hands.only %>% dplyr::filter(!is.na(hand_id))
   
   events.flips.only <- events %>% 
     dplyr::filter(TRIGGER == 65535)
