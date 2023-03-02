@@ -37,9 +37,6 @@ extract_events <- function(eeg.file, beh.file){
     mutate(hand_id = NA) %>%
     select(-time)
   
-  hand_counter <- 1
-  eeg_event_counter <- 1
-  
   # while(eeg_event_counter <= nrow(events.hands.only)){
   #   if(events.hands.only$TRIGGER[eeg_event_counter] == hand.ids$sequence_id[hand_counter]){
   #     events.hands.only$hand_id[eeg_event_counter] = hand.ids$hand_id[hand_counter]
@@ -56,18 +53,19 @@ extract_events <- function(eeg.file, beh.file){
   eeg.hand.events.encoded  <- L[eeg.hand.events] %>% paste0(collapse="")
   jspsych.hand.sequence.encoded <- L[jspsych.hand.sequence] %>% paste0(collapse="")
   
-  alignment.solution <- text.alignment::smith_waterman(eeg.hand.events.encoded, jspsych.hand.sequence.encoded, lower=FALSE)
+  #alignment.solution <- text.alignment::smith_waterman(eeg.hand.events.encoded, jspsych.hand.sequence.encoded, gap=-1,lower=FALSE)
+  alignment.solution <- NameNeedle::needles(eeg.hand.events.encoded, jspsych.hand.sequence.encoded)
   
-  a.z <- unlist(sapply(stringr::str_split(alignment.solution$a$alignment$text,"")[[1]], function(x){ 
-    if(x=="#") { return(NA) } 
+  a.z <- unlist(sapply(stringr::str_split(alignment.solution$align1,"")[[1]], function(x){ 
+    if(x=="*") { return(NA) } 
     return(which(L==x))
   }, simplify=TRUE))
-  b.z <- unlist(sapply(stringr::str_split(alignment.solution$b$alignment$text,"")[[1]], function(x){ 
-    if(x=="#") { return(NA) } 
+  b.z <- unlist(sapply(stringr::str_split(alignment.solution$align2,"")[[1]], function(x){ 
+    if(x=="*") { return(NA) } 
     return(which(L==x))
   }, simplify=TRUE))
   
-  aligned.hands <- rep(0, length(a))
+  aligned.hands <- rep(0, length(eeg.hand.events.encoded))
   event.loc <- 1
   hand.id <- 1
   for(i in 1:length(a.z)){
@@ -103,9 +101,17 @@ extract_events <- function(eeg.file, beh.file){
     dplyr::filter(!is.na(offset_time)) %>%
     rowwise() %>%
     mutate(card_id = which.min(abs(offset_time - c(2,5,8,11,14)))) %>%
+    ungroup() %>%
+    group_by(hand_id) %>%
+    mutate(card_event_n = n()) %>%
     ungroup()
   
-  events <- event.flips.with.card.id %>% select(sample_id, hand_id, card_id)
+  # filter out hands with more than 5 flip events. 
+  # this is very rare, but due to noise/connection in event marker hardware.
+  
+  events <- event.flips.with.card.id %>%
+    dplyr::filter(card_event_n <= 5) %>%
+    select(sample_id, hand_id, card_id)
   
   return(events)
 }

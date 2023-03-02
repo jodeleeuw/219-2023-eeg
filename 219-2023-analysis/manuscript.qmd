@@ -47,7 +47,7 @@ data.behavioral <- read_csv("data/preprocessed/behavioral.csv")
 #| label: Count participants
 #| echo: false
 
-n.participants <- data.behavioral %>% pull(subject_id) %>% unique() %>% length()
+n.participants <- data.behavioral %>% pull(subject) %>% unique() %>% length()
 ```
 
 `r n.participants` Vassar College students participated in this study. All participants were right-handed.
@@ -61,13 +61,12 @@ n.participants <- data.behavioral %>% pull(subject_id) %>% unique() %>% length()
 #| echo: false
 
 attention.check.responses <- data.behavioral %>%
-  filter(task=="catch", phase=="test", card == catch_n) %>%
-  group_by(subject_id) %>%
-  summarize(successes = sum(rt < 1500), mean_rt = mean(rt))
+  filter(task=="catch", phase=="test", card_id == catch_n) %>%
+  group_by(subject) %>%
+  summarize(successes = sum(rt < 1500, na.rm=TRUE), mean_rt = mean(rt, na.rm=TRUE))
 
-attention.check.overall.m <- attention.check.responses %>% pull(successes) %>% mean()
-attention.check.overall.sd <- attention.check.responses %>% pull(successes) %>%
-  sd()
+attention.check.tally <- attention.check.responses %>% group_by(successes) %>% summarize(n=n())
+
 attention.check.rt.m <- attention.check.responses %>% pull(mean_rt) %>%
   mean() %>% round(0)
 attention.check.rt.sd <- attention.check.responses %>% pull(mean_rt) %>%
@@ -77,7 +76,46 @@ attention.check.rt.sd <- attention.check.responses %>% pull(mean_rt) %>%
 attention.check.failures <- attention.check.responses %>% filter(successes < 3)
 ```
 
-There were five attention check trials, one during each block, throughout the experiment. The mean number of correct responses was `r attention.check.overall.m` (*SD* = `r attention.check.overall.sd`) and the average response time was `r attention.check.rt.m`ms (*SD* = `r attention.check.rt.sd`). As per our pre-registered criteria, we excluded `r nrow(attention.check.failures)` participants for failing more than 2 attention checks (defined as a response time greater than 1,500ms).
+There were five attention check trials, one during each block, throughout the experiment. `r attention.check.tally %>% filter(successes==5) %>% pull(n)` of `r n.participants` responded in time to all 5 attention checks, and `r attention.check.tally %>% filter(successes==4) %>% pull(n)` responded correctly to 4 of the 5 attention checks. The average response time was `r attention.check.rt.m`ms (*SD* = `r attention.check.rt.sd`). As per our pre-registered criteria, we excluded `r nrow(attention.check.failures)` participants for failing more than 2 attention checks (defined as a response time greater than 1,500ms).
+
+```{r}
+#| label: Compute RPEs and IPEs
+#| echo: false
+#| message: false
+
+hand.information <- data.behavioral %>% 
+  filter(phase=='test', task=='reveal') %>%
+  group_by(subject) %>%
+  mutate(hand_id = rep(1:80, each=5)) %>%
+  ungroup() %>%
+  mutate(losses_so_far = (card_id-1) - wins_so_far) %>%
+  select(subject, hand_id, card_id, card_value, wins_so_far, losses_so_far, outcome)
+
+hand.information.with.rpe <- hand.information %>%
+  mutate(
+    wp_before = pbinom(2-losses_so_far, 5-(card_id-1), 0.5), 
+    wp_after = pbinom(2-(losses_so_far+(1-card_value)), 5-card_id, 0.5), 
+    rpe = wp_after-wp_before)
+
+entropy <- function(p){
+  return(ifelse(p == 0 | p == 1, 0, -p*log2(p) - (1-p)*log2(1-p)))
+}
+
+hand.information.with.rpe.and.ipe <- hand.information.with.rpe %>%
+  mutate(wp_alternative = pbinom(2-(losses_so_far+card_value), 5-card_id, 0.5)) %>%
+  mutate(information = entropy(wp_before) - entropy(wp_after),
+         information_alt = entropy(wp_before) - entropy(wp_alternative),
+         information_expected = (information + information_alt) / 2,
+         ipe = information - information_expected) %>%
+  mutate(rpe_type = case_when(
+    rpe > 0 ~ "Positive",
+    rpe < 0 ~ "Negative",
+    rpe == 0 ~ "None")) %>%
+  mutate(ipe_type = case_when(
+    ipe > 0 ~ "Positive",
+    ipe < 0 ~ "Negative",
+    ipe == 0 ~ "None"))
+```
 
 ### EEG
 
@@ -101,55 +139,13 @@ data.eeg.filtered <- data.eeg %>%
 ```
 
 ```{r}
-#| label: Compute RPEs and IPEs
+#| label: Merge RPE and IPE info into EEG data
 #| echo: false
 #| message: false
 
-hand.information <- data.behavioral %>% 
-  filter(phase=='test', task=='reveal') %>%
-  mutate(subject = subject_id) %>%
-  select(-subject_id) %>%
-  group_by(subject) %>%
-  mutate(hand_id = rep(1:80, each=5)) %>%
-  mutate(losses_so_far = (card-1) - wins_so_far) %>%
-  select(subject, hand_id, card, card_value, wins_so_far, losses_so_far, outcome)
-
-hand.information.with.rpe <- hand.information %>%
-  mutate(
-    wp_before = pbinom(2-losses_so_far, 5-(card-1), 0.5), 
-    wp_after = pbinom(2-(losses_so_far+abs(1-card_value)), 5-card, 0.5), 
-    rpe = wp_after-wp_before)
-
-entropy <- function(p){
-  return(ifelse(p == 0 | p == 1, 0, -p*log2(p) - (1-p)*log2(1-p)))
-}
-
-hand.information.with.rpe.and.ipe <- hand.information.with.rpe %>%
-  mutate(wp_alternative = pbinom(2-(losses_so_far+card_value), 5-card, 0.5)) %>%
-  mutate(information = entropy(wp_before) - entropy(wp_after),
-         information_expected = ((entropy(wp_before) - entropy(wp_after)) + (entropy(wp_before) - entropy(wp_alternative))) / 2,
-         ipe = information - information_expected) %>%
-  mutate(rpe_type = case_when(
-    rpe > 0 ~ "Positive",
-    rpe < 0 ~ "Negative",
-    rpe == 0 ~ "None")) %>%
-  mutate(ipe_type = case_when(
-    ipe > 0 ~ "Positive",
-    ipe < 0 ~ "Negative",
-    ipe == 0 ~ "None"))
-
 data.eeg.filtered.rpe.ipe <- data.eeg.filtered %>%
-  mutate(card = card_id) %>%
-  select(-card_id) %>%
-  left_join(hand.information.with.rpe.and.ipe, by=c("subject", "hand_id", "card"))
+  left_join(hand.information.with.rpe.and.ipe, by=c("subject", "hand_id", "card_id"))
 
-```
-
-```{r}
-#| label: Define ERP time window
-#| echo: false
-
-frn.window <- 200:350
 ```
 
 ```{r}
@@ -159,10 +155,10 @@ frn.window <- 200:350
 
 rpe.segments <- data.eeg.filtered.rpe.ipe %>%
   filter(rpe_type != "None") %>%
-  group_by(subject, electrode, hand_id, card, rpe_type) %>%
-  summarize(n = n()) %>%
+  group_by(subject, electrode, hand_id, card_id, rpe_type) %>%
+  slice_head(n=1) %>%
   group_by(subject, electrode, rpe_type) %>%
-  summarize(n = n())
+  summarize(n=n())
 ```
 
 ```{r}
@@ -172,8 +168,8 @@ rpe.segments <- data.eeg.filtered.rpe.ipe %>%
 
 ipe.segments <- data.eeg.filtered.rpe.ipe %>%
   filter(ipe_type != "None") %>%
-  group_by(subject, electrode, hand_id, card, ipe_type) %>%
-  summarize(n = n()) %>%
+  group_by(subject, electrode, hand_id, card_id, ipe_type) %>%
+  slice_head(n=1) %>%
   group_by(subject, electrode, ipe_type) %>%
   summarize(n = n())
 ```
@@ -189,7 +185,14 @@ bad.eeg.subjects <- rpe.segments %>%
   unique()
 ```
 
-We pre-registered an inclusion criteria that a participant must have at least 20 usable epochs of data of a particular event type in order to be included in the corresponding analyses. The minimum number of usable epochs for the RPE analysis in an individual subject was `r rpe.segments %>% pull(n) %>% min()`, *M*=`r rpe.segments %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r rpe.segments %>% pull(n) %>% sd() %>% round(0)`. The minimum number of usable epochs for the IPE analysis in an individual subject was `r ipe.segments %>% pull(n) %>% min()`, *M*=`r ipe.segments %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r ipe.segments %>% pull(n) %>% sd() %>% round(0)`. `r bad.eeg.subjects %>% length()` subject was excluded for poor EEG data quality.
+We pre-registered an inclusion criteria that a participant must have at least 20 usable epochs of data of a particular event type in order to be included in the corresponding analyses. `r bad.eeg.subjects %>% length()` subjects were excluded for having fewer than 20 usable epochs in all event types. Of the remaining subjects, the average number of usable epochs for the RPE analysis in an individual subject was `r rpe.segments %>% filter(!subject %in% bad.eeg.subjects) %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r rpe.segments %>% filter(!subject %in% bad.eeg.subjects) %>% pull(n) %>% sd() %>% round(0)`. The average number of usable epochs for the IPE analysis was `r ipe.segments %>% filter(!subject %in% bad.eeg.subjects) %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r ipe.segments %>% filter(!subject %in% bad.eeg.subjects) %>% pull(n) %>% sd() %>% round(0)`.
+
+```{r}
+#| label: Define ERP time window
+#| echo: false
+
+frn.window <- 200:350
+```
 
 ```{r}
 #| label: Generate data for Grand Averages
