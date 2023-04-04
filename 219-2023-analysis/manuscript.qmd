@@ -17,6 +17,7 @@ library(dplyr)
 library(ggplot2)
 library(readr)
 library(ez)
+library(tidyr)
 library(osfr)
 ```
 
@@ -115,6 +116,9 @@ hand.information.with.rpe.and.ipe <- hand.information.with.rpe %>%
     ipe > 0 ~ "Positive",
     ipe < 0 ~ "Negative",
     ipe == 0 ~ "None"))
+
+hand.information.minimal.set <- hand.information.with.rpe.and.ipe %>%
+  select(subject, hand_id, card_id, rpe, ipe, rpe_type, ipe_type)
 ```
 
 ### EEG
@@ -124,17 +128,8 @@ hand.information.with.rpe.and.ipe <- hand.information.with.rpe %>%
 #| echo: false
 #| message: false
 
-data.eeg <- read_csv('data/preprocessed/eeg.csv')
-
-```
-
-```{r}
-#| label: Filter EEG data
-#| echo: false
-
-data.eeg.filtered <- data.eeg %>%
-  filter(good_segment == TRUE) %>%
-  filter(electrode %in% c("Cz", "Fz"))
+data.eeg.filtered <- read_csv('data/preprocessed/eeg.csv') %>%
+  filter(good_segment == TRUE, electrode %in% c("Cz", "Fz"))
 
 ```
 
@@ -144,7 +139,7 @@ data.eeg.filtered <- data.eeg %>%
 #| message: false
 
 data.eeg.filtered.rpe.ipe <- data.eeg.filtered %>%
-  left_join(hand.information.with.rpe.and.ipe, by=c("subject", "hand_id", "card_id"))
+  left_join(hand.information.minimal.set, by=c("subject", "hand_id", "card_id"))
 
 ```
 
@@ -178,14 +173,20 @@ ipe.segments <- data.eeg.filtered.rpe.ipe %>%
 #| label: Exclude bad EEG
 #| echo: false
 
-bad.eeg.subjects <- rpe.segments %>% 
-  filter(n < 20) %>% 
-  bind_rows(ipe.segments %>% filter(n < 20)) %>%
-  pull(subject) %>%
-  unique()
+rpe.good.subjects <- rpe.segments %>%
+  group_by(subject) %>%
+  summarize(include = all(n >= 20)) %>%
+  filter(include == TRUE) %>%
+  pull(subject)
+
+ipe.good.subjects <- ipe.segments %>%
+  group_by(subject) %>%
+  summarize(include = all(n >= 20)) %>%
+  filter(include == TRUE) %>%
+  pull(subject)
 ```
 
-We pre-registered an inclusion criteria that a participant must have at least 20 usable epochs of data of a particular event type in order to be included in the corresponding analyses. `r bad.eeg.subjects %>% length()` subjects were excluded for having fewer than 20 usable epochs in all event types. Of the remaining subjects, the average number of usable epochs for the RPE analysis in an individual subject was `r rpe.segments %>% filter(!subject %in% bad.eeg.subjects) %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r rpe.segments %>% filter(!subject %in% bad.eeg.subjects) %>% pull(n) %>% sd() %>% round(0)`. The average number of usable epochs for the IPE analysis was `r ipe.segments %>% filter(!subject %in% bad.eeg.subjects) %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r ipe.segments %>% filter(!subject %in% bad.eeg.subjects) %>% pull(n) %>% sd() %>% round(0)`.
+We pre-registered an inclusion criteria that a participant must have at least 20 usable epochs of data of a particular event type in order to be included in the corresponding analyses. `r rpe.good.subjects %>% length()` subjects were included in the RPE analysis and `r ipe.good.subjects %>% length()` subjects were included in the IPE analysis. The average number of usable epochs for the RPE analysis in an individual subject was `r rpe.segments %>% filter(subject %in% rpe.good.subjects) %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r rpe.segments %>% filter(subject %in% rpe.good.subjects) %>% pull(n) %>% sd() %>% round(0)`. The average number of usable epochs for the IPE analysis was `r ipe.segments %>% filter(subject %in% ipe.good.subjects) %>% pull(n) %>% mean() %>% round(0)`, *SD*=`r ipe.segments %>% filter(subject %in% ipe.good.subjects) %>% pull(n) %>% sd() %>% round(0)`.
 
 ```{r}
 #| label: Define ERP time window
@@ -201,7 +202,7 @@ frn.window <- 200:350
 
 rpe.erp.data.subject <- data.eeg.filtered.rpe.ipe %>%
   filter(rpe_type != "None") %>%
-  filter(!subject %in% bad.eeg.subjects) %>%
+  filter(subject %in% rpe.good.subjects) %>%
   group_by(subject, electrode, t, rpe_type) %>%
   summarize(m.subject = mean(v))
 
@@ -212,7 +213,7 @@ rpe.erp.data.group <- rpe.erp.data.subject %>%
 
 ipe.erp.data.subject <- data.eeg.filtered.rpe.ipe %>%
   filter(ipe_type != "None") %>%
-  filter(!subject %in% bad.eeg.subjects) %>%
+  filter(subject %in% ipe.good.subjects) %>%
   group_by(subject, electrode, t, ipe_type) %>%
   summarize(m.subject = mean(v))
 
@@ -248,6 +249,55 @@ ggplot(erp.data, aes(x=t, y=m, ymin=m-se, ymax=m+se, color=error_sign, fill=erro
 ```
 
 ```{r}
+#| label: Difference wave summary data
+#| echo: false
+#| message: false
+
+difference.wave.data.rpe <- rpe.erp.data.subject %>%
+  pivot_wider(names_from = rpe_type, values_from = m.subject) %>%
+  mutate(difference.subject = Positive - Negative)
+
+difference.wave.summary.rpe <- difference.wave.data.rpe %>%
+  group_by(electrode, t) %>%
+  summarize(difference = mean(difference.subject), se=sd(difference.subject)/sqrt(n())) %>%
+  mutate(error_type = "Reward Prediction Error")
+
+difference.wave.data.ipe <- ipe.erp.data.subject %>%
+  pivot_wider(names_from = ipe_type, values_from = m.subject) %>%
+  mutate(difference.subject = Positive - Negative)
+
+difference.wave.summary.ipe <- difference.wave.data.ipe %>%
+  group_by(electrode, t) %>%
+  summarize(difference = mean(difference.subject), se=sd(difference.subject)/sqrt(n())) %>%
+  mutate(error_type = "Information Prediction Error")
+
+difference.erp.data <- difference.wave.summary.rpe %>% bind_rows(difference.wave.summary.ipe)
+
+```
+
+```{r}
+#| label: fig-difference-waves
+#| echo: false
+#| fig-cap: Grand average difference wave ERPs for both electrode sites (Cz, Fz). Values above 0 indicate that positive errors had a more positive ERP than negative errors. The critical time window for our analysis, 200-350ms, is highlighted.
+
+ggplot(difference.erp.data, aes(x=t,y=difference, ymin=difference-se, ymax=difference+se, color=error_type, fill=error_type))+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  annotate("rect", xmin=min(frn.window), xmax=max(frn.window), ymin=-Inf, ymax=Inf, alpha=0.1)+
+  geom_ribbon(color=NA, alpha=0.2)+
+  geom_line()+
+   scale_color_brewer(type="qual", palette = "Set2", name="Error Type")+
+  scale_fill_brewer(type="qual", palette = "Set2", name="Error Type")+
+  facet_grid(electrode~.)+
+  labs(x="Time since card value revealed (ms)", y="Positive - Negative Prediction Errors\n(Microvolts)")+
+  theme_minimal()+
+  theme(panel.grid = element_blank())
+
+```
+
+Brydevall et al. reported that the ERPs in the 200-350ms window following positive prediction errors were more positive than the ERPs following negative prediction errors, for both information prediction errors and reward prediciton errors. Following our pre-registration, we ran two ANOVAs to see if there was a main effect of reward type (positive vs. negative). We included electrode (Cz vs. Fz) as a factor, as well as the interaction between reward type and electrode.
+
+```{r}
 #| label: Compute ANOVA data
 #| echo: false
 #| message: false
@@ -273,6 +323,8 @@ rpe.anova <- ezANOVA(rpe.anova.data, dv=M, wid=subject, within=c(electrode, rpe_
 rpe.anova$ANOVA
 ```
 
+The ANOVA table above shows that there is no significant effect of error type for reward prediction errors.
+
 ```{r}
 #| label: IPE ANOVA
 #| echo: false
@@ -282,3 +334,5 @@ ipe.anova <- ezANOVA(ipe.anova.data, dv=M, wid=subject, within=c(electrode, ipe_
 
 ipe.anova$ANOVA
 ```
+
+However, there was a significant effect of error type for information prediction errors. This confirms the pattern that is evident in both @fig-grand-averages and @fig-difference-waves, where there is no clear visual difference between the ERPs for reward prediction errors, but there is a clear difference for information prediction errors.
