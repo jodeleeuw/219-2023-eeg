@@ -336,3 +336,87 @@ ipe.anova$ANOVA
 ```
 
 However, there was a significant effect of error type for information prediction errors. This confirms the pattern that is evident in both @fig-grand-averages and @fig-difference-waves, where there is no clear visual difference between the ERPs for reward prediction errors, but there is a clear difference for information prediction errors.
+
+### Exploratory Analysis
+
+```{r}
+trial.level.data <- data.eeg.filtered.rpe.ipe %>%
+  filter(subject %in% rpe.good.subjects) %>%
+  filter(t %in% frn.window) %>%
+  group_by(subject, hand_id, card_id, electrode, rpe_type, rpe, ipe) %>%
+  summarize(m.subject = mean(v))
+```
+
+```{r}
+library(brms)
+
+fit <- brm(m.subject ~ rpe + ipe + (1 + rpe + ipe | subject/hand_id), data=trial.level.data, cores=4)
+```
+
+
+```{r}
+summary(fit)
+```
+
+
+```{r}
+unsigned_fit <- brm(m.subject ~ rpe + ipe + (1 + rpe + ipe | subject/hand_id), data=trial.level.data %>% mutate(ipe=abs(ipe), rpe=abs(rpe)), cores=4)
+```
+
+```{r}
+summary(unsigned_fit)
+```
+
+```{r}
+abs.plot.data <- data.eeg.filtered.rpe.ipe %>%
+  filter(subject %in% rpe.good.subjects) %>%
+  mutate(rpe=round(rpe, 4)) %>%
+  group_by(subject, electrode, t, rpe) %>%
+  summarize(m.subject = mean(v)) %>%
+  group_by(electrode, t, rpe) %>%
+  summarize(m = mean(m.subject), se=sd(m.subject)/sqrt(n()))
+```
+
+```{r}
+ggplot(abs.plot.data, aes(x=t, y=m, ymin=m-se, ymax=m+se, color=rpe, group=rpe))+
+  geom_line()+
+  facet_wrap(~electrode)
+```
+
+```{r}
+abs.plot.data <- data.eeg.filtered.rpe.ipe %>%
+  filter(subject %in% ipe.good.subjects) %>%
+  mutate(ipe=round(ipe, 4)) %>%
+  group_by(subject, electrode, t, ipe) %>%
+  summarize(m.subject = mean(v)) %>%
+  group_by(electrode, t, ipe) %>%
+  summarize(m = mean(m.subject), se=sd(m.subject)/sqrt(n()))
+```
+
+```{r}
+ggplot(abs.plot.data, aes(x=t, y=m, ymin=m-se, ymax=m+se, color=ipe, group=ipe))+
+  geom_line()+
+  facet_wrap(~electrode)
+```
+
+```{r}
+ipe.rpe.counts <- hand.information.minimal.set %>% count(rpe, ipe)
+
+ggplot(ipe.rpe.counts, aes(x=ipe,y=rpe,size=n))+
+  geom_point()+
+  theme_minimal()
+```
+
+
+
+- Reprocess data with eye blink removal procedure
+- Use a mixed-effects model
+- Look for any RPE FRNs. (Is there literature about where else this might show up?)
+- Unsigned prediction errors?
+- Look at information gain instead of information prediction error.
+
+Descriptive statistics of RPE and IPE.
+Means and SD 
+Run the joint model, predicting FRN amplitude with RPE and IPE as predictor variables.  [We got here thinking about Camryn’s concern that we measure both in the FRN window.]
+Run first half (of the trials), second half, and random half of data to address point that the reward may have become less salient as people figured out what was going on.  Prediction if true:  First half we detect RPE second half we don’t.
+Run a model that encodes the strength of the RPE/IPE rather than just +/-.
