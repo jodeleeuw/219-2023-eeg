@@ -9,9 +9,7 @@ editor: visual
 
 ```{r}
 #| label: Load libraries
-#| echo: false
-#| message: false
-#| warning: false
+#| include: false
 
 library(dplyr)
 library(ggplot2)
@@ -24,7 +22,6 @@ library(osfr)
 ```{r}
 #| label: Get preprocessed data from OSF
 #| include: false
-#| echo: false
 
 osf_retrieve_node("2pxf4") %>%
   osf_ls_files() %>%
@@ -35,8 +32,7 @@ osf_retrieve_node("2pxf4") %>%
 
 ```{r}
 #| label: Load the Behavioral Data
-#| echo: false
-#| message: false
+#| include: false
 
 
 data.behavioral <- read_csv("data/preprocessed/behavioral.csv")
@@ -81,8 +77,7 @@ There were five attention check trials, one during each block, throughout the ex
 
 ```{r}
 #| label: Compute RPEs and IPEs
-#| echo: false
-#| message: false
+#| include: false
 
 hand.information <- data.behavioral %>% 
   filter(phase=='test', task=='reveal') %>%
@@ -125,8 +120,7 @@ hand.information.minimal.set <- hand.information.with.rpe.and.ipe %>%
 
 ```{r}
 #| label: Load EEG data
-#| echo: false
-#| message: false
+#| include: false
 
 data.eeg.filtered <- read_csv('data/preprocessed/eeg.csv') %>%
   filter(good_segment == TRUE, electrode %in% c("Cz", "Fz"))
@@ -135,8 +129,7 @@ data.eeg.filtered <- read_csv('data/preprocessed/eeg.csv') %>%
 
 ```{r}
 #| label: Merge RPE and IPE info into EEG data
-#| echo: false
-#| message: false
+#| include: false
 
 data.eeg.filtered.rpe.ipe <- data.eeg.filtered %>%
   left_join(hand.information.minimal.set, by=c("subject", "hand_id", "card_id"))
@@ -145,8 +138,7 @@ data.eeg.filtered.rpe.ipe <- data.eeg.filtered %>%
 
 ```{r}
 #| label: Count usable segments for RPEs
-#| echo: false
-#| message: false
+#| include: false
 
 rpe.segments <- data.eeg.filtered.rpe.ipe %>%
   filter(rpe_type != "None") %>%
@@ -158,8 +150,7 @@ rpe.segments <- data.eeg.filtered.rpe.ipe %>%
 
 ```{r}
 #| label: Count usable segments for IPEs
-#| echo: false
-#| message: false
+#| include: false
 
 ipe.segments <- data.eeg.filtered.rpe.ipe %>%
   filter(ipe_type != "None") %>%
@@ -171,7 +162,7 @@ ipe.segments <- data.eeg.filtered.rpe.ipe %>%
 
 ```{r}
 #| label: Exclude bad EEG
-#| echo: false
+#| include: false
 
 rpe.good.subjects <- rpe.segments %>%
   group_by(subject) %>%
@@ -197,8 +188,7 @@ frn.window <- 200:350
 
 ```{r}
 #| label: Generate data for Grand Averages
-#| echo: false
-#| message: false
+#| include: false
 
 rpe.erp.data.subject <- data.eeg.filtered.rpe.ipe %>%
   filter(rpe_type != "None") %>%
@@ -250,8 +240,7 @@ ggplot(erp.data, aes(x=t, y=m, ymin=m-se, ymax=m+se, color=error_sign, fill=erro
 
 ```{r}
 #| label: Difference wave summary data
-#| echo: false
-#| message: false
+#| include: false
 
 difference.wave.data.rpe <- rpe.erp.data.subject %>%
   pivot_wider(names_from = rpe_type, values_from = m.subject) %>%
@@ -299,8 +288,7 @@ Brydevall et al. reported that the ERPs in the 200-350ms window following positi
 
 ```{r}
 #| label: Compute ANOVA data
-#| echo: false
-#| message: false
+#| include: false
 
 rpe.anova.data <- rpe.erp.data.subject %>%
   filter(t %in% frn.window) %>%
@@ -420,3 +408,56 @@ Means and SD
 Run the joint model, predicting FRN amplitude with RPE and IPE as predictor variables.  [We got here thinking about Camryn’s concern that we measure both in the FRN window.]
 Run first half (of the trials), second half, and random half of data to address point that the reward may have become less salient as people figured out what was going on.  Prediction if true:  First half we detect RPE second half we don’t.
 Run a model that encodes the strength of the RPE/IPE rather than just +/-.
+
+
+Question: What if we run a model that includes both IPE and RPE as predictors to account for the fact that we have overlapping manipulations. And what if we include the magnitude of the prediction error rather than just presence/absence?
+
+```{r}
+#| include: false
+trial.level.data <- data.eeg.filtered.rpe.ipe %>%
+  filter(t %in% frn.window, subject %in% ipe.good.subjects) %>%
+  group_by(subject, electrode, hand_id, card_id, ipe, rpe) %>%
+  summarize(M = mean(v))
+```
+
+```{r}
+#| message: false
+library(lmerTest)
+library(brms)
+
+mm.result <- brm(M ~ rpe*electrode + ipe*electrode + (rpe + ipe + electrode | subject), data=trial.level.data)
+
+summary(mm.result)
+```
+
+```{r}
+library(broom.mixed)
+rr <- ranef(mm.result, condVar=TRUE)
+ff <- fixef(mm.result)
+aa <- broom::augment(rr)
+
+ggplot(aa,aes(estimate,level,xmin=lb,xmax=ub))+
+  geom_errorbarh(height=0)+
+  geom_vline(xintercept=0,lty=2)+
+  geom_point()+facet_wrap(~variable,scale="free_x")
+```
+
+Question: Did the reward become less salient over time? Try splitting the data based on block and look at effect of RPE on FRN.
+
+```{r}
+trial.level.data.with.block <- data.eeg.filtered.rpe.ipe %>%
+  filter(t %in% frn.window, subject %in% ipe.good.subjects) %>%
+  group_by(subject, electrode, hand_id, card_id, ipe, rpe) %>%
+  summarize(M = mean(v)) %>%
+  mutate(block = if_else(hand_id <= 40, 0, 1))
+```
+
+```{r}
+#| message: false
+library(lmerTest)
+
+mm.block.result <- lmer(M ~  rpe*block + electrode + (rpe*block + electrode | subject), data=trial.level.data.with.block)
+
+summary(mm.block.result)
+```
+
